@@ -18,15 +18,14 @@ openclaw plugins install @composio/openclaw-plugin
 
 ```bash
 openclaw config set plugins.entries.composio.config.consumerKey "ck_your_key_here"
-```
-
-Then allow Composio tools in your agent's tool list. This works with any tool profile (`coding`, `minimal`, `messaging`, etc.). Without this step, Composio tools will only be available on the `full` tool profile:
-
-```bash
+openclaw config set plugins.allow '["composio"]'
 openclaw config set tools.alsoAllow '["composio"]'
 ```
 
-After setting your key and allowing the tools, restart the gateway:
+- `plugins.allow` ensures the Composio plugin is explicitly trusted and allowed to load.
+- `tools.alsoAllow` ensures Composio tools remain available on non-`full` tool profiles such as `coding`, `minimal`, and `messaging`.
+
+After setting your key and allowlists, restart the gateway:
 
 ```bash
 openclaw gateway restart
@@ -34,7 +33,7 @@ openclaw gateway restart
 
 ## How It Works
 
-The plugin connects to Composio's MCP server at `https://connect.composio.dev/mcp` and registers all available tools directly into the OpenClaw agent. Tools are called by name — no extra search or execute steps needed.
+The plugin connects to Composio's MCP server at `https://connect.composio.dev/mcp` and registers all available tools directly into the OpenClaw agent. Once the plugin is configured, Composio tools show up directly inside OpenClaw and can be invoked like native tools.
 
 If a tool returns an auth error, the agent will prompt you to connect that toolkit at [dashboard.composio.dev](http://dashboard.composio.dev/~/org/connect/clients/openclaw).
 
