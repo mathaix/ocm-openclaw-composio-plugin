@@ -1,6 +1,5 @@
 export interface ComposioConfig {
   enabled: boolean;
-  consumerKey: string;
-  mcpUrl: string;
+  apiUrl: string;
   userId: string;
 }

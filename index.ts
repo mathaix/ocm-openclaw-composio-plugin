@@ -2,32 +2,34 @@ import type { OpenClawPluginApi } from "openclaw/plugin-sdk";
 import { execFileSync } from "node:child_process";
 import { composioPluginConfigSchema, parseComposioConfig } from "./src/config.js";
 
-function fetchToolsSync(mcpUrl: string, consumerKey: string, userId: string) {
-  const url = new URL(mcpUrl);
-  if (userId && userId !== "default") {
-    url.searchParams.set("user_id", userId);
-  }
-  const body = JSON.stringify({ jsonrpc: "2.0", id: "1", method: "tools/list" });
+function fetchToolsSync(apiUrl: string, userId: string) {
+  const url = `${apiUrl}/tools?user_id=${encodeURIComponent(userId)}`;
   const raw = execFileSync("curl", [
-    url.toString(), "-s", "-X", "POST",
-    "-H", "Content-Type: application/json",
-    "-H", "Accept: application/json, text/event-stream",
-    "-H", `x-consumer-api-key: ${consumerKey}`,
-    "-d", body,
+    url, "-s",
+    "-H", "Accept: application/json",
   ], { encoding: "utf-8", timeout: 15_000 });
 
-  // Response may be SSE (event: message\ndata: {...}) or plain JSON
-  let jsonStr = raw;
-  const dataMatch = raw.match(/^data:\s*(.+)$/m);
-  if (dataMatch) jsonStr = dataMatch[1];
-
-  const parsed = JSON.parse(jsonStr);
-  if (parsed.error) throw new Error(parsed.error.message ?? JSON.stringify(parsed.error));
-  return (parsed.result?.tools ?? []) as Array<{
+  const parsed = JSON.parse(raw);
+  return (parsed.tools ?? []) as Array<{
     name: string;
     description?: string;
-    inputSchema?: Record<string, unknown>;
+    parameters?: Record<string, unknown>;
   }>;
+}
+
+function executeActionSync(apiUrl: string, action: string, userId: string, params: Record<string, unknown>): string {
+  const url = `${apiUrl}/actions/${encodeURIComponent(action)}/execute`;
+  const body = JSON.stringify({ user_id: userId, params });
+  const raw = execFileSync("curl", [
+    url, "-s", "-X", "POST",
+    "-H", "Content-Type: application/json",
+    "-H", "Accept: application/json",
+    "-d", body,
+  ], { encoding: "utf-8", timeout: 30_000 });
+
+  const parsed = JSON.parse(raw);
+  if (parsed.error) throw new Error(parsed.error);
+  return typeof parsed.data === "string" ? parsed.data : JSON.stringify(parsed.data);
 }
 
 const composioPlugin = {
@@ -44,19 +46,17 @@ const composioPlugin = {
       return;
     }
 
-    if (!config.consumerKey) {
+    if (!config.apiUrl) {
       api.logger.warn(
-        "[composio] No consumer key configured. Set COMPOSIO_CONSUMER_KEY env var or plugins.composio.consumerKey in config. Get your key (ck_...) from dashboard.composio.dev/~/org/connect/clients/openclaw"
+        "[composio] No API URL configured. The Composio integration is not available."
       );
       return;
     }
 
-    // State for the prompt hook
     let toolCount = 0;
     let connectError = "";
     let ready = false;
 
-    // Register hook immediately so the gateway picks it up
     api.on("before_prompt_build", () => ({
       prependSystemContext: ready && toolCount > 0
         ? `<composio>
@@ -71,8 +71,6 @@ If the task needs an external service API → Composio. If it can be done locall
 
 For tasks that span both (e.g., "read invoice.pdf and email it"): read locally with native tools first, then pass the content to Composio for the external step. Composio's sandbox cannot access local files.
 
-Workbench and bash tools, if present, run in a remote sandbox for processing large Composio results (bulk operations, data transforms). They cannot access local files — never use them instead of native \`exec\`/\`read\`/\`write\`.
-
 Connections persist — no gateway restart needed.
 
 ## Rules
@@ -84,83 +82,30 @@ Connections persist — no gateway restart needed.
         : ready
           ? `<composio>
 The Composio plugin connected but loaded zero tools.${connectError ? ` Error: ${connectError}` : ""}
-
-When the user asks about external integrations (Gmail, Slack, GitHub, Calendar, Calendly, etc.), respond with:
-
-"The Composio plugin is installed but couldn't load its tools. To fix this:
-1. Get your consumer API key (starts with \`ck_\`) from http://dashboard.composio.dev/~/org/connect/clients/openclaw
-2. Run: \`openclaw config set plugins.entries.composio.config.consumerKey "ck_your_key_here"\`
-3. Run: \`openclaw gateway restart\`"
-
-Do NOT pretend Composio tools exist or hallucinate tool calls. You have zero Composio tools available.
-Do NOT use pretrained knowledge about Composio APIs, SDKs, or tool names.
+When the user asks about external integrations, let them know Composio tools are not currently available.
+Do NOT pretend Composio tools exist or hallucinate tool calls.
 </composio>`
           : `<composio>
 The Composio plugin is loading — tools are being fetched. They should be available shortly.
 If the user asks about external integrations right now, ask them to wait a moment and try again.
-Do NOT use pretrained knowledge about Composio APIs or SDKs.
 </composio>`,
     }));
 
-    // --- Synchronous: fetch tool list and register names ---
-    api.logger.info(`[composio] Fetching tools from ${config.mcpUrl}`);
-
-    let mcpClient: { callTool: (req: { name: string; arguments: Record<string, unknown> }) => Promise<unknown> } | null = null;
-
-    const mcpReady = (async () => {
-      const { Client } = await import("@modelcontextprotocol/sdk/client/index.js");
-      const { StreamableHTTPClientTransport } = await import(
-        "@modelcontextprotocol/sdk/client/streamableHttp.js"
-      );
-      const client = new Client({ name: "openclaw", version: "1.0" });
-      const mcpUrlWithUser = new URL(config.mcpUrl);
-      if (config.userId && config.userId !== "default") {
-        mcpUrlWithUser.searchParams.set("user_id", config.userId);
-      }
-      await client.connect(
-        new StreamableHTTPClientTransport(mcpUrlWithUser, {
-          requestInit: {
-            headers: { "x-consumer-api-key": config.consumerKey },
-          },
-        })
-      );
-      mcpClient = client;
-      api.logger.info("[composio] MCP client connected");
-    })().catch((err) => {
-      api.logger.error(`[composio] MCP client connection failed: ${err instanceof Error ? err.message : String(err)}`);
-    });
+    api.logger.info(`[composio] Fetching tools from ${config.apiUrl}`);
 
     try {
-      const tools = fetchToolsSync(config.mcpUrl, config.consumerKey, config.userId);
+      const tools = fetchToolsSync(config.apiUrl, config.userId);
 
       for (const tool of tools) {
         api.registerTool({
           name: tool.name,
           label: tool.name,
           description: tool.description ?? "",
-          parameters: (tool.inputSchema ?? { type: "object", properties: {} }) as Record<string, unknown>,
+          parameters: (tool.parameters ?? { type: "object", properties: {} }) as Record<string, unknown>,
 
           async execute(_toolCallId: string, params: Record<string, unknown>) {
-            // Wait for background MCP connection if not ready yet
-            await mcpReady;
-            if (!mcpClient) {
-              return {
-                content: [{ type: "text" as const, text: "Error: Composio MCP client failed to connect. Check your consumer key and try restarting the gateway." }],
-                details: null,
-              };
-            }
-
             try {
-              const result = await mcpClient.callTool({ name: tool.name, arguments: params }) as {
-                content?: Array<{ type: string; text?: string }>;
-              };
-
-              const text = Array.isArray(result.content)
-                ? result.content
-                    .map((c) => c.type === "text" ? (c.text ?? "") : JSON.stringify(c))
-                    .join("\n")
-                : JSON.stringify(result);
-
+              const text = executeActionSync(config.apiUrl, tool.name, config.userId, params);
               return {
                 content: [{ type: "text" as const, text }],
                 details: null,
@@ -182,7 +127,7 @@ Do NOT use pretrained knowledge about Composio APIs or SDKs.
     } catch (err) {
       connectError = err instanceof Error ? err.message : String(err);
       ready = true;
-      api.logger.error(`[composio] Failed to connect: ${connectError}`);
+      api.logger.error(`[composio] Failed to fetch tools: ${connectError}`);
     }
   },
 };
