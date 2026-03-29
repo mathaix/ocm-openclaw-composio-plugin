@@ -1,5 +1,5 @@
 {
-  "name": "@composio/openclaw-plugin",
+  "name": "@mathaix/ocm-openclaw-composio-plugin",
   "version": "0.0.8",
   "type": "module",
   "description": "OpenClaw Composio plugin - access 1000+ third-party tools via Composio Tool Router",
@@ -11,10 +11,10 @@
     "mcp",
     "plugin"
   ],
-  "homepage": "https://github.com/ComposioHQ/openclaw-composio-plugin",
+  "homepage": "https://github.com/mathaix/ocm-openclaw-composio-plugin",
   "repository": {
     "type": "git",
-    "url": "https://github.com/ComposioHQ/openclaw-composio-plugin.git"
+    "url": "https://github.com/mathaix/ocm-openclaw-composio-plugin.git"
   },
   "license": "MIT",
   "files": [

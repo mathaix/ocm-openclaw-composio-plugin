@@ -20,6 +20,10 @@
       "mcpUrl": {
         "type": "string",
         "description": "Composio MCP server URL (default: https://connect.composio.dev/mcp)"
+      },
+      "userId": {
+        "type": "string",
+        "description": "Machine-specific user ID for per-machine connection isolation (injected by OCM, do not set manually)"
       }
     }
   },

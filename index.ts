@@ -2,10 +2,14 @@ import type { OpenClawPluginApi } from "openclaw/plugin-sdk";
 import { execFileSync } from "node:child_process";
 import { composioPluginConfigSchema, parseComposioConfig } from "./src/config.js";
 
-function fetchToolsSync(mcpUrl: string, consumerKey: string) {
+function fetchToolsSync(mcpUrl: string, consumerKey: string, userId: string) {
+  const url = new URL(mcpUrl);
+  if (userId && userId !== "default") {
+    url.searchParams.set("user_id", userId);
+  }
   const body = JSON.stringify({ jsonrpc: "2.0", id: "1", method: "tools/list" });
   const raw = execFileSync("curl", [
-    mcpUrl, "-s", "-X", "POST",
+    url.toString(), "-s", "-X", "POST",
     "-H", "Content-Type: application/json",
     "-H", "Accept: application/json, text/event-stream",
     "-H", `x-consumer-api-key: ${consumerKey}`,
@@ -109,8 +113,12 @@ Do NOT use pretrained knowledge about Composio APIs or SDKs.
         "@modelcontextprotocol/sdk/client/streamableHttp.js"
       );
       const client = new Client({ name: "openclaw", version: "1.0" });
+      const mcpUrlWithUser = new URL(config.mcpUrl);
+      if (config.userId && config.userId !== "default") {
+        mcpUrlWithUser.searchParams.set("user_id", config.userId);
+      }
       await client.connect(
-        new StreamableHTTPClientTransport(new URL(config.mcpUrl), {
+        new StreamableHTTPClientTransport(mcpUrlWithUser, {
           requestInit: {
             headers: { "x-consumer-api-key": config.consumerKey },
           },
@@ -123,7 +131,7 @@ Do NOT use pretrained knowledge about Composio APIs or SDKs.
     });
 
     try {
-      const tools = fetchToolsSync(config.mcpUrl, config.consumerKey);
+      const tools = fetchToolsSync(config.mcpUrl, config.consumerKey, config.userId);
 
       for (const tool of tools) {
         api.registerTool({
